@@ -40,6 +40,6 @@ def get_message_id(message:DescriptorProto,descriptor:FileDescriptorProto):
 
 
 def get_method_id(service:ServiceDescriptorProto,method:MethodDescriptorProto, file_descriptor:FileDescriptorProto):
-    package = file_descriptor.package or ""
+    package = file_descriptor.package or "EMPTY"
     full_name = ".".join([package,service.name,method.name,method.input_type,method.output_type])
     return get_id_from_string(full_name)

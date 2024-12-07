@@ -19,7 +19,7 @@ def get_rpc_client_handler(service_name:str,service_methods:List[CSharpMethod]):
           var size = message.CalculateSize();
           var bytes = ArrayPool<byte>.Shared.Rent(size);
           message.WriteTo(bytes);
-          client.CallRpc({m.id}, 0, {input_arg_name}.MessageId, bytes, isReliable);
+          client.CallRpc({m.id}, 0, {input_arg_name}.MessageId, new Span<byte>(bytes,0,size), isReliable);
           ArrayPool<byte>.Shared.Return(bytes);
 """
             else:
@@ -65,7 +65,7 @@ def get_rpc_client_handler(service_name:str,service_methods:List[CSharpMethod]):
               }}
               rpcResponseHandlers.Remove(reqId);
           }};
-          client.CallRpc({m.id}, reqId, {input_arg_name}.MessageId,bytes,isReliable);
+          client.CallRpc({m.id}, reqId, {input_arg_name}.MessageId,new Span<byte>(bytes,0,size),isReliable);
           ArrayPool<byte>.Shared.Return(bytes);
           return taskCompletionSource.Task;
 """
@@ -76,17 +76,17 @@ def get_rpc_client_handler(service_name:str,service_methods:List[CSharpMethod]):
     return f"""
     public class {service_name}ClientHandler : I{service_name}Client, IDisposable
     {{
-      OmgppSharpClient.Client client;
-      Dictionary<long, OmgppSharpClient.IClientRpcHandler.ClientRpcHandlerDelegate> rpcHandlers = new Dictionary<long, OmgppSharpClient.IClientRpcHandler.ClientRpcHandlerDelegate>();
-      Dictionary<ulong, OmgppSharpClient.IClientRpcHandler.ClientRpcHandlerDelegate> rpcResponseHandlers = new Dictionary<ulong, OmgppSharpClient.IClientRpcHandler.ClientRpcHandlerDelegate>();
+      global::OmgppSharpClientServer.Client client;
+      Dictionary<long, OmgppSharpClientServer.IClientRpcHandler.ClientRpcHandlerDelegate> rpcHandlers = new Dictionary<long, OmgppSharpClientServer.IClientRpcHandler.ClientRpcHandlerDelegate>();
+      Dictionary<ulong, OmgppSharpClientServer.IClientRpcHandler.ClientRpcHandlerDelegate> rpcResponseHandlers = new Dictionary<ulong, OmgppSharpClientServer.IClientRpcHandler.ClientRpcHandlerDelegate>();
       ulong reqId = 0;
-      public {service_name}ClientHandler(OmgppSharpClient.Client client)
+      public {service_name}ClientHandler(global::OmgppSharpClientServer.Client client)
       {{
           this.client = client;
           this.client.OnRpcCall += Client_OnRpcCall;
       }}
 
-      private void Client_OnRpcCall(Client client, System.Net.IPAddress remoteIp, ushort remotePort, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)
+      private void Client_OnRpcCall(global::OmgppSharpClientServer.Client client, System.Net.IPAddress remoteIp, ushort remotePort, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)
       {{
           if(rpcResponseHandlers.TryGetValue(requestId, out var handler))
               handler.Invoke(client,remoteIp,remotePort, isReliable, methodId, requestId, argType, argData);
@@ -96,7 +96,7 @@ def get_rpc_client_handler(service_name:str,service_methods:List[CSharpMethod]):
           this.client.OnRpcCall -= Client_OnRpcCall;
       }}
 
-      void RegisterRpc(long id, OmgppSharpClient.IClientRpcHandler.ClientRpcHandlerDelegate handlerAction)
+      void RegisterRpc(long id, OmgppSharpClientServer.IClientRpcHandler.ClientRpcHandlerDelegate handlerAction)
       {{
           rpcHandlers[id] = handlerAction;
       }}
@@ -110,7 +110,7 @@ def get_rpc_client_handler(service_name:str,service_methods:List[CSharpMethod]):
 def get_rpc_server_handler(service_name,service_methods:List[CSharpMethod]):
     handle_methods = ""
     for m in service_methods:
-        method = f"private void Handle{m.name}(Server server, Guid clientGuid, IPAddress ip, ushort port, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)"
+        method = f"private void Handle{m.name}(global::OmgppSharpClientServer.Server server, Guid clientGuid, IPAddress ip, ushort port, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)"
         method += "{\n"
         if not m.has_output:
             if m.has_input_message:
@@ -130,7 +130,7 @@ def get_rpc_server_handler(service_name,service_methods:List[CSharpMethod]):
             method += f"""var size = result?.CalculateSize() ?? 0;
                 var data = ArrayPool<byte>.Shared.Rent(size);
                 result?.WriteTo(data);
-                server.CallRpc(clientGuid, methodId, requestId, {m.input_args[0][0]}.MessageId, data, isReliable);
+                server.CallRpc(clientGuid, methodId, requestId, {m.input_args[0][0]}.MessageId, new Span<byte>(data,0,size), isReliable);
                 ArrayPool<byte>.Shared.Return(data);\n
 """
 
@@ -144,7 +144,7 @@ def get_rpc_server_handler(service_name,service_methods:List[CSharpMethod]):
         register_handle_methods += f"RegisterRpc({m.id}, Handle{m.name});\n"
 
     return f"""
-    public class {service_name}ServerHandler : global::OmgppSharpServer.IServerRpcHandler
+    public class {service_name}ServerHandler : global::OmgppSharpClientServer.IServerRpcHandler
     {{
         I{service_name}Server service;
         Dictionary<long,ServerRpcHandlerDelegate> rpcHandlers = new Dictionary<long, ServerRpcHandlerDelegate>();
@@ -156,7 +156,7 @@ def get_rpc_server_handler(service_name,service_methods:List[CSharpMethod]):
         }}
         {handle_methods}
  
-        public void HandleRpc(Server server, Guid clientGuid, IPAddress ip, ushort port, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)
+        public void HandleRpc(global::OmgppSharpClientServer.Server server, Guid clientGuid, IPAddress ip, ushort port, bool isReliable, long methodId, ulong requestId, long argType, byte[]? argData)
         {{
             if (rpcHandlers.TryGetValue(methodId, out var handler))
                 handler.Invoke(server, clientGuid, ip, port,isReliable,methodId,requestId, argType, argData);
